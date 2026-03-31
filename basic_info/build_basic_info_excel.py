@@ -21,10 +21,21 @@ def timestamp_to_date(value):
         return ""
 
 
+def normalize_cell(value):
+    if value in (None, ""):
+        return ""
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, list):
+        normalized_items = [normalize_cell(item) for item in value if item not in (None, "")]
+        return "; ".join(str(item) for item in normalized_items if item != "")
+    return value
+
+
 def stringify_list(value):
     if isinstance(value, list):
-        return "; ".join(str(item) for item in value if item not in (None, ""))
-    return value or ""
+        return normalize_cell(value)
+    return normalize_cell(value)
 
 
 def append_rows_with_sheet_split(workbook, sheet_title: str, headers: Sequence[str], rows: Sequence[Sequence]):
@@ -59,34 +70,34 @@ def load_rows():
 
         rows.append(
             [
-                data.get("bin", path.stem),
-                data.get("name", ""),
-                data.get("fullName", ""),
-                data.get("rnn", ""),
-                data.get("iin", ""),
+                normalize_cell(data.get("bin", path.stem)),
+                normalize_cell(data.get("name", "")),
+                normalize_cell(data.get("fullName", "")),
+                normalize_cell(data.get("rnn", "")),
+                normalize_cell(data.get("iin", "")),
                 stringify_list(data.get("field")),
-                data.get("factAddress", ""),
-                data.get("region", ""),
-                data.get("lawAddress", ""),
-                data.get("okpo", ""),
-                data.get("oked", ""),
-                data.get("owner", ""),
-                data.get("ownerIin", ""),
+                normalize_cell(data.get("factAddress", "")),
+                normalize_cell(data.get("region", "")),
+                normalize_cell(data.get("lawAddress", "")),
+                normalize_cell(data.get("okpo", "")),
+                normalize_cell(data.get("oked", "")),
+                normalize_cell(data.get("owner", "")),
+                normalize_cell(data.get("ownerIin", "")),
                 timestamp_to_date(data.get("registerDate")),
-                data.get("workers", ""),
-                data.get("size", ""),
-                data.get("krpCode", ""),
-                data.get("ownership", ""),
-                data.get("kato", ""),
-                data.get("city", ""),
-                data.get("street", ""),
-                data.get("secondaryOked", ""),
-                data.get("kbe", ""),
-                data.get("phone", ""),
-                data.get("email", ""),
-                data.get("website", ""),
-                data.get("stateInvolvement", ""),
-                data.get("astanaHub", ""),
+                normalize_cell(data.get("workers", "")),
+                normalize_cell(data.get("size", "")),
+                normalize_cell(data.get("krpCode", "")),
+                normalize_cell(data.get("ownership", "")),
+                normalize_cell(data.get("kato", "")),
+                normalize_cell(data.get("city", "")),
+                normalize_cell(data.get("street", "")),
+                normalize_cell(data.get("secondaryOked", "")),
+                normalize_cell(data.get("kbe", "")),
+                normalize_cell(data.get("phone", "")),
+                normalize_cell(data.get("email", "")),
+                normalize_cell(data.get("website", "")),
+                normalize_cell(data.get("stateInvolvement", "")),
+                normalize_cell(data.get("astanaHub", "")),
             ]
         )
 
