@@ -155,4 +155,5 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    for i in range(3):
+        asyncio.run(main())

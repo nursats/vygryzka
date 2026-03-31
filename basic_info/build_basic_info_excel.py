@@ -1,11 +1,14 @@
 import datetime
 import json
+import re
 from pathlib import Path
-from typing import Sequence
+from typing import List, Sequence
 
 import openpyxl
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = SCRIPT_DIR.parent
+BIN_LIST_PATH = ROOT_DIR / "all_bins.txt"
 JSON_DIR = SCRIPT_DIR / "json"
 OUTPUT_FILE = SCRIPT_DIR / "basic_info.xlsx"
 MAX_EXCEL_ROWS = 1_048_576
@@ -38,6 +41,30 @@ def stringify_list(value):
     return normalize_cell(value)
 
 
+def normalize_identifier(value):
+    digits = "".join(ch for ch in str(value) if ch.isdigit())
+    if len(digits) == 11:
+        digits = f"0{digits}"
+    if len(digits) != 12:
+        return None
+    return digits
+
+
+def read_identifiers(path: Path) -> List[str]:
+    raw_identifiers = re.findall(r"\d+", path.read_text(encoding="utf-8"))
+    identifiers = []
+    seen = set()
+
+    for raw_identifier in raw_identifiers:
+        identifier = normalize_identifier(raw_identifier)
+        if identifier is None or identifier in seen:
+            continue
+        identifiers.append(identifier)
+        seen.add(identifier)
+
+    return identifiers
+
+
 def append_rows_with_sheet_split(workbook, sheet_title: str, headers: Sequence[str], rows: Sequence[Sequence]):
     sheet_index = 1
     ws = workbook.active
@@ -56,25 +83,61 @@ def append_rows_with_sheet_split(workbook, sheet_title: str, headers: Sequence[s
         written_on_sheet += 1
 
 
-def load_rows():
-    rows = []
-    json_files = sorted(JSON_DIR.glob("*.json"))
-    print(f"Found JSON files: {len(json_files)}")
+def build_empty_row(identifier: str):
+    return [
+        identifier,
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+    ]
 
-    for path in json_files:
+
+def load_rows(identifiers: Sequence[str]):
+    rows = []
+    print(f"Found identifiers in all_bins.txt: {len(identifiers)}")
+
+    for identifier in identifiers:
+        path = JSON_DIR / f"{identifier}.json"
+        if not path.exists():
+            rows.append(build_empty_row(identifier))
+            continue
+
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as e:
             print(f"Skipping {path.name}: {e}")
+            rows.append(build_empty_row(identifier))
             continue
 
         rows.append(
             [
-                normalize_cell(data.get("bin", path.stem)),
+                identifier,
                 normalize_cell(data.get("name", "")),
                 normalize_cell(data.get("fullName", "")),
                 normalize_cell(data.get("rnn", "")),
-                normalize_cell(data.get("iin", "")),
                 stringify_list(data.get("field")),
                 normalize_cell(data.get("factAddress", "")),
                 normalize_cell(data.get("region", "")),
@@ -113,7 +176,6 @@ def main():
         "name",
         "fullName",
         "rnn",
-        "iin",
         "field",
         "factAddress",
         "region",
@@ -138,7 +200,8 @@ def main():
         "stateInvolvement",
         "astanaHub",
     ]
-    rows = load_rows()
+    identifiers = read_identifiers(BIN_LIST_PATH)
+    rows = load_rows(identifiers)
 
     wb = openpyxl.Workbook()
     append_rows_with_sheet_split(wb, "basic_info", headers, rows)
