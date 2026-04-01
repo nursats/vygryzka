@@ -3,7 +3,7 @@ import json
 import datetime
 import openpyxl
 
-JSON_DIR = "json_responses"
+JSON_DIR = "all_bins_json"
 OUTPUT_TAX = "1_Налоговые_отчисления.xlsx"
 OUTPUT_FOT = "2_Оценочный_ФОТ.xlsx"
 OUTPUT_FINES = "3_Штрафы_и_пени.xlsx"
