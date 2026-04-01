@@ -1,6 +1,7 @@
-import os
-import json
 import datetime
+import json
+import os
+
 import openpyxl
 
 JSON_DIR = "all_bins_json"
@@ -16,137 +17,176 @@ def timestamp_to_date(ts):
         return ""
     try:
         return datetime.datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d")
-    except (ValueError, OSError):
+    except (ValueError, OSError, TypeError):
         return ""
 
 
-def load_all_payments():
-    """Load all payments from saved JSONs."""
-    all_payments = []
-    json_files = sorted(f for f in os.listdir(JSON_DIR) if f.endswith(".json"))
+def iter_json_files():
+    for filename in sorted(f for f in os.listdir(JSON_DIR) if f.endswith(".json")):
+        yield filename
+
+
+def iter_payments():
+    json_files = list(iter_json_files())
     print(f"Found {len(json_files)} JSON files")
 
-    for jf in json_files:
-        identifier = jf.replace(".json", "")
+    total_payments = 0
+    for filename in json_files:
+        identifier = filename[:-5]
+        path = os.path.join(JSON_DIR, filename)
+
         try:
-            with open(os.path.join(JSON_DIR, jf), "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-        except (json.JSONDecodeError, Exception) as e:
-            print(f"  Skipping corrupted file {jf}: {e}")
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"Skipping {filename}: {e}")
             continue
 
         payments = data.get("content", {}).get("answer", {}).get("payment", [])
-        for p in payments:
-            all_payments.append({
+        for payment in payments:
+            total_payments += 1
+            yield {
                 "identifier": identifier,
-                "summa": p.get("summa", 0) or 0,
-                "receipt_date": timestamp_to_date(p.get("receiptDate")),
-                "write_off_date": timestamp_to_date(p.get("writeOffDate")),
-                "year": p.get("year", ""),
-                "pay_type": p.get("payType", ""),
-                "tax_org_code": p.get("taxOrgCode", ""),
-                "name_ru": p.get("nameTaxRu", ""),
-                "name_kz": p.get("nameTaxKz", ""),
-                "kbk_code": p.get("kbk", ""),
-                "kbk_name_ru": p.get("kbkNameRu", ""),
-                "kbk_name_kz": p.get("kbkNameKz", ""),
-            })
+                "summa": payment.get("summa", 0) or 0,
+                "receipt_date": timestamp_to_date(payment.get("receiptDate")),
+                "write_off_date": timestamp_to_date(payment.get("writeOffDate")),
+                "year": payment.get("year", ""),
+                "pay_type": payment.get("payType", ""),
+                "tax_org_code": payment.get("taxOrgCode", ""),
+                "name_ru": payment.get("nameTaxRu", ""),
+                "name_kz": payment.get("nameTaxKz", ""),
+                "kbk_code": payment.get("kbk", ""),
+                "kbk_name_ru": payment.get("kbkNameRu", ""),
+                "kbk_name_kz": payment.get("kbkNameKz", ""),
+            }
 
-    print(f"Total payment records: {len(all_payments)}")
-    return all_payments
+    print(f"Total payment records scanned: {total_payments}")
 
 
-def append_rows_with_sheet_split(workbook, sheet_title, headers, rows):
-    sheet_index = 1
-    ws = workbook.active
-    ws.title = sheet_title
+def create_sheet(workbook, sheet_title, headers, sheet_index):
+    name = sheet_title if sheet_index == 1 else f"{sheet_title} {sheet_index}"
+    ws = workbook.create_sheet(title=name)
     ws.append(headers)
-    written_on_sheet = 0
+    return ws
 
-    for row in rows:
+
+def stream_to_workbook(output_path, sheet_title, headers, row_iterable):
+    wb = openpyxl.Workbook(write_only=True)
+    sheet_index = 1
+    ws = create_sheet(wb, sheet_title, headers, sheet_index)
+    written_on_sheet = 0
+    total_written = 0
+
+    for row in row_iterable:
         if written_on_sheet >= MAX_DATA_ROWS_PER_SHEET:
             sheet_index += 1
-            ws = workbook.create_sheet(f"{sheet_title} {sheet_index}")
-            ws.append(headers)
+            ws = create_sheet(wb, sheet_title, headers, sheet_index)
             written_on_sheet = 0
 
         ws.append(row)
         written_on_sheet += 1
+        total_written += 1
+
+    wb.save(output_path)
+    print(f"Saved {output_path}: {total_written} rows")
 
 
-def build_tax_excel(payments):
-    """File 1: All tax payments broken down by KBK."""
-    print(f"\nBuilding {OUTPUT_TAX}...")
-    wb = openpyxl.Workbook()
-    headers = [
-        "identifier", "summa", "receipt_date", "write_off_date", "year",
-        "pay_type", "tax_org_code", "name_ru", "name_kz",
-        "kbk_code", "name_ru", "name_kz"
-    ]
-
-    rows = []
-    for p in payments:
-        rows.append([
-            p["identifier"], p["summa"], p["receipt_date"], p["write_off_date"],
-            p["year"], p["pay_type"], p["tax_org_code"], p["name_ru"], p["name_kz"],
-            p["kbk_code"], p["kbk_name_ru"], p["kbk_name_kz"],
-        ])
-    append_rows_with_sheet_split(wb, "Налоговые отчисления", headers, rows)
-
-    wb.save(OUTPUT_TAX)
-    print(f"  Saved {OUTPUT_TAX}: {len(rows)} rows")
+def tax_rows():
+    for payment in iter_payments():
+        yield [
+            payment["identifier"],
+            payment["summa"],
+            payment["receipt_date"],
+            payment["write_off_date"],
+            payment["year"],
+            payment["pay_type"],
+            payment["tax_org_code"],
+            payment["name_ru"],
+            payment["name_kz"],
+            payment["kbk_code"],
+            payment["kbk_name_ru"],
+            payment["kbk_name_kz"],
+        ]
 
 
-def build_fot_excel(payments):
-    """File 2: Estimated payroll fund (FOT).
-    Logic from FotService: filter kbk_code == '901101', summa * 10.
-    """
-    print(f"\nBuilding {OUTPUT_FOT}...")
-    wb = openpyxl.Workbook()
-    headers = ["identifier", "summa", "write_off_date", "year"]
-    rows = []
-    for p in payments:
-        if p["kbk_code"] == "901101" and p["pay_type"] == 1:
-            fot_summa = round(p["summa"] * 10, 2)
-            rows.append([
-                p["identifier"], fot_summa, p["write_off_date"], p["year"]
-            ])
-    append_rows_with_sheet_split(wb, "Оценочный ФОТ", headers, rows)
-
-    wb.save(OUTPUT_FOT)
-    print(f"  Saved {OUTPUT_FOT}: {len(rows)} rows")
+def fot_rows():
+    for payment in iter_payments():
+        if payment["kbk_code"] == "901101" and payment["pay_type"] == 1:
+            yield [
+                payment["identifier"],
+                round(payment["summa"] * 10, 2),
+                payment["write_off_date"],
+                payment["year"],
+            ]
 
 
-def build_fines_excel(payments):
-    """File 3: Fines and penalties.
-    Logic from TaxService: pay_type in (2, 3) — пени и штрафы.
-    """
-    print(f"\nBuilding {OUTPUT_FINES}...")
-    wb = openpyxl.Workbook()
-    headers = [
-        "identifier", "summa", "receipt_date", "write_off_date", "year",
-        "pay_type", "tax_org_code", "name_ru", "name_kz",
-        "kbk_code", "name_ru", "name_kz"
-    ]
-    rows = []
-    for p in payments:
-        if p["pay_type"] in (2, 3):
-            rows.append([
-                p["identifier"], p["summa"], p["receipt_date"], p["write_off_date"],
-                p["year"], p["pay_type"], p["tax_org_code"], p["name_ru"], p["name_kz"],
-                p["kbk_code"], p["kbk_name_ru"], p["kbk_name_kz"],
-            ])
-    append_rows_with_sheet_split(wb, "Штрафы и пени", headers, rows)
-
-    wb.save(OUTPUT_FINES)
-    print(f"  Saved {OUTPUT_FINES}: {len(rows)} rows")
+def fines_rows():
+    for payment in iter_payments():
+        if payment["pay_type"] in (2, 3):
+            yield [
+                payment["identifier"],
+                payment["summa"],
+                payment["receipt_date"],
+                payment["write_off_date"],
+                payment["year"],
+                payment["pay_type"],
+                payment["tax_org_code"],
+                payment["name_ru"],
+                payment["name_kz"],
+                payment["kbk_code"],
+                payment["kbk_name_ru"],
+                payment["kbk_name_kz"],
+            ]
 
 
 def main():
-    payments = load_all_payments()
-    build_tax_excel(payments)
-    build_fot_excel(payments)
-    build_fines_excel(payments)
+    stream_to_workbook(
+        OUTPUT_TAX,
+        "Налоговые отчисления",
+        [
+            "identifier",
+            "summa",
+            "receipt_date",
+            "write_off_date",
+            "year",
+            "pay_type",
+            "tax_org_code",
+            "name_ru",
+            "name_kz",
+            "kbk_code",
+            "kbk_name_ru",
+            "kbk_name_kz",
+        ],
+        tax_rows(),
+    )
+
+    stream_to_workbook(
+        OUTPUT_FOT,
+        "Оценочный ФОТ",
+        ["identifier", "summa", "write_off_date", "year"],
+        fot_rows(),
+    )
+
+    stream_to_workbook(
+        OUTPUT_FINES,
+        "Штрафы и пени",
+        [
+            "identifier",
+            "summa",
+            "receipt_date",
+            "write_off_date",
+            "year",
+            "pay_type",
+            "tax_org_code",
+            "name_ru",
+            "name_kz",
+            "kbk_code",
+            "kbk_name_ru",
+            "kbk_name_kz",
+        ],
+        fines_rows(),
+    )
+
     print("\nDone! All 3 Excel files created.")
 
 
